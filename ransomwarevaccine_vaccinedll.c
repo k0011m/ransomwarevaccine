@@ -475,7 +475,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved){
             dwProtectMode = 3;
         }else{
             MessageBoxA(NULL, "Enviroment Value error (protect_mode value)", "vaccinedll-ERROR", MB_ICONERROR);
-            dwProtectMode = 3; // 不明な値の場合は安全側として AN (通過) にフォールバック
+            dwProtectMode = 1; // 不明な値の場合は安全側として AB (All Block) にフォールバック
         }
 
         allhook();
