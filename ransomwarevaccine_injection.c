@@ -48,16 +48,15 @@ void helpoption(){
 
 
 int main(int argc, char *selectmode[]){
-    if (!strcmp(selectmode[1], "-help") || !strcmp(selectmode[1], "-Help") || !strcmp(selectmode[1], "-h") || !strcmp(selectmode[1], "-H")){
-        helpoption();
-        return 1;
-    }
     if (argc < 5){
+        if (argc >= 2 && (!strcmp(selectmode[1], "-help") || !strcmp(selectmode[1], "-Help") || !strcmp(selectmode[1], "-h") || !strcmp(selectmode[1], "-H"))){
+            helpoption();
+            return 0;
+        }
         printf("plz <target file path or name> <option> <notice> <log>\nFor details on options, use the help command. -help");
         return 1;
     }
 
-    const char *targetfilenamep = "ransomwarevaccine_vaccinedll.dll";
     if (!strcmp(selectmode[2], "-AB")) SetEnvironmentVariableA("ransomwarevaccine_protect_mode", "1");
     else if (!strcmp(selectmode[2], "-WDB")) SetEnvironmentVariableA("ransomwarevaccine_protect_mode", "2");
     else if (!strcmp(selectmode[2], "-AN")) SetEnvironmentVariableA("ransomwarevaccine_protect_mode", "3");
@@ -68,13 +67,28 @@ int main(int argc, char *selectmode[]){
 
     char targetfilename[256];
     if (argc>=6){
-        sprintf(targetfilename, "%s\\%s", selectmode[5], targetfilenamep);
+        sprintf(targetfilename, "%s\\%s", selectmode[5], "ransomwarevaccine_vaccinedll.dll");
         if (GetFileAttributesA(targetfilename) == INVALID_FILE_ATTRIBUTES) {
             MessageBoxA(NULL, "This directory cannot be found", "ERROR MESSAGE", MB_ICONERROR);
             return 1;
         }
-    }else sprintf(targetfilename, "%s\\%s", "C:\\Users\\K0011M\\Downloads\\ransomware_vaccine\\mainfolder", targetfilenamep);
-
+    }else {
+        char szInjectionPath[MAX_PATH];
+        char szInjectionDir[MAX_PATH];
+        GetModuleFileNameA(NULL, szInjectionPath, MAX_PATH);
+    
+        char *lastBackslash = strrchr(szInjectionPath, '\\');
+        if (lastBackslash) {
+            int dirLength = lastBackslash - szInjectionPath;
+            strncpy(szInjectionDir, szInjectionPath, dirLength);
+            szInjectionDir[dirLength] = '\0';
+        } else {
+            strcpy(szInjectionDir, ".");
+        }
+        
+        sprintf(targetfilename, "%s\\%s", szInjectionDir, "ransomwarevaccine_vaccinedll.dll");
+    }
+    
     if (!strcmp(selectmode[3], "-TM")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "1");
     else if (!strcmp(selectmode[3], "-TC")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "2");
     else if (!strcmp(selectmode[3], "-F")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "0");
@@ -90,12 +104,9 @@ int main(int argc, char *selectmode[]){
         return 1;
     }
     
-    //target file nameをwcharに変換
-    selectmode[1];
     wchar_t applicationName[256];
     MultiByteToWideChar(CP_ACP, 0, selectmode[1], -1, applicationName, strlen(selectmode[1])+1);
 
-    //CreateProcessWの引数を設定
     wchar_t currentDirectory[1024];
     GetCurrentDirectoryW(1024, currentDirectory);
     STARTUPINFOW startupInfo = { sizeof(startupInfo) };
@@ -103,8 +114,6 @@ int main(int argc, char *selectmode[]){
     LPTHREAD_START_ROUTINE LoadLibAddr = (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
 
     if (LoadLibAddr == NULL) MessageBoxA(NULL, "LoadLibrary GetProcAddress Error", "Error", MB_OK);
-
-    DEBUG_EVENT debugevent;
 
     SetEnvironmentVariableA("ransomwarevaccine_dll_path", targetfilename);
 
