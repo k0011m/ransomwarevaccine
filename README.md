@@ -30,13 +30,13 @@
 ### 基本的な使用方法
 
 ```bash
-ransomwarevaccine_injection.exe <target.exe> <mode> <notification> <logging> [DLL_path]
+ransomwarevaccine_injection.exe <target.exe> <mode> <notification> <logging> [--dllpath=...] [--logpath=...] [--logname=...]
 ```
 
 ### 最もシンプルな例
 
 ```bash
-# ランサムウェアを AB モード（完全ブロック）で監視
+# ランサムウェアを AB モード（完全ブロック）で監視、ログ有効
 ransomwarevaccine_injection.exe suspicious.exe -AB -TM -T
 ```
 
@@ -46,7 +46,9 @@ ransomwarevaccine_injection.exe suspicious.exe -AB -TM -T
 # モード: -AB / -WDB / -AN
 # 通知: -TM (MessageBox) / -TC (Console) / -F (Silent)
 # ログ: -T (Enable) / -F (Disable)
-# DLL_path: (オプション) カスタム DLL パス
+# DLL_path: (オプション) --dllpath=[カスタム DLL ディレクトリ]
+# Log_path: (オプション) --logpath=[カスタムログディレクトリ]
+# Log_name: (オプション) --logname=[カスタムログファイル名]
 ```
 
 ---
@@ -149,7 +151,7 @@ ransomwarevaccine_injection.exe target.exe -AN -F -T
 | `-T` | ログ出力有効 |
 | `-F` | ログ出力無効 |
 
-**注記**: 現在のバージョンではログ出力機能が準備中です。オプション自体は認識されます。
+**ログ出力について:** ログ有効時（`-T`）、ファイルアクセス操作が記録されます。デフォルトでは `C:\Users\[Username]\ransomwarevaccine_logfolder` に自動ファイル名（`ransomwarevaccine_log_[実験対象ファイル名]_[タイムスタンプ].txt`）で保存されます。カスタム場所・ファイル名は、以下の**ログのオプション**で指定可能です。
 
 **使用例:**
 ```bash
@@ -162,18 +164,56 @@ ransomwarevaccine_injection.exe target.exe -WDB -TC -F
 
 ---
 
-### ランサムウェアワクチン DLL の配置（第5引数）オプション
+### ログのオプション
 
-デフォルト動作では、**`ransomwarevaccine_injection.exe` と同じフォルダ**から `ransomwarevaccine_vaccinedll.dll` を探します。
-
-カスタム配置する場合は、第5引数にフォルダパスを指定：
+#### **カスタム DLL パス指定**
 
 ```bash
-# DLL がカスタムパスにある場合
-ransomwarevaccine_injection.exe target.exe -AB -TM -T C:\\custom\\path\\to\\dll
+--dllpath=[ディレクトリパス]
 ```
 
-この場合、`C:\custom\path\to\dll\ransomwarevaccine_vaccinedll.dll` を探します。
+デフォルトでは、`ransomwarevaccine_injection.exe` と同じディレクトリから `ransomwarevaccine_vaccinedll.dll` を探します。異なる場所に DLL がある場合、このオプションで指定してください。
+
+**例:**
+```bash
+ransomwarevaccine_injection.exe target.exe -AB -TM -T --dllpath=C:\\custom\\dll\\path
+```
+
+この場合、`C:\custom\dll\path\ransomwarevaccine_vaccinedll.dll` を探します。
+
+---
+
+#### **カスタムログフォルダ指定**
+
+```bash
+--logpath=[ログを保存するディレクトリパス]
+```
+
+ログ出力を有効化（`-T`）した際、ログファイルの保存先を自由に指定できます。指定されない場合は、デフォルトの `C:\Users\[Username]\ransomwarevaccine_logfolder` に保存されます。
+
+**例:**
+```bash
+ransomwarevaccine_injection.exe target.exe -AB -TM -T --logpath=C:\\mylogdir
+```
+
+`C:\mylogdir` にログファイルが保存されます。
+
+---
+
+#### **カスタムログファイル名指定**
+
+```bash
+--logname=[ログファイル名]
+```
+
+ログ出力を有効化（`-T`）した際、ログファイルの名前を指定できます。ファイル拡張子（`.txt` など）も含めて指定してください。指定されない場合は、自動ファイル名 `ransomwarevaccine_log_[実験対象ファイル名]_[YYYYMMDD_HHMMSS].txt` が使用されます。
+
+**例:**
+```bash
+ransomwarevaccine_injection.exe target.exe -AB -TM -T --logpath=C:\\logs --logname=analysis_run1.txt
+```
+
+`C:\logs\analysis_run1.txt` にログが保存されます。
 
 ---
 
@@ -238,7 +278,8 @@ ransomwarevaccine_injection.exe ransomware.exe -AB -TM -T
 3. CreateFile が `INVALID_HANDLE_VALUE` を返す → ファイルオープン失敗
 4. WriteFile が `FALSE` を返す → ファイル書き込み失敗
 5. DeleteFile が `FALSE` を返す → ファイル削除失敗
-6. **ランサムウェアのファイル暗号化が失敗し、ファイルが保護される**
+6. ログが `C:\Users\[Username]\ransomwarevaccine_logfolder\ransomwarevaccine_log_ransomware.exe_YYYYMMDD_HHMMSS.txt` に記録される
+7. **ランサムウェアのファイル暗号化が失敗し、ファイルが保護される**
 
 ---
 
@@ -274,6 +315,36 @@ ransomwarevaccine_injection.exe suspicious.exe -AN -F -T
 4. ログに全操作を記録
 5. **プロセスは完全に通常動作するが、ファイルアクセスが記録される**
 6. 後で、ログを分析して疑わしい操作を検出
+
+---
+
+### 例4: カスタムログパス・ファイル名での実行例
+
+```bash
+ransomwarevaccine_injection.exe target.exe -AB -TM -T --logpath=C:\\analysis\\logs --logname=run1.txt
+```
+
+**実行結果:**
+
+1. `target.exe` が起動される
+2. ファイル操作がブロックされ、MessageBox で通知
+3. ログが `C:\analysis\logs\run1.txt` に記録される
+4. ユーザーの指定したログ場所に結果が保存される
+
+---
+
+### 例5: カスタム DLL パス指定での実行例
+
+```bash
+ransomwarevaccine_injection.exe target.exe -WDB -TC -T --dllpath=D:\\custom\\dlls
+```
+
+**実行結果:**
+
+1. `target.exe` が起動される
+2. `D:\custom\dlls\ransomwarevaccine_vaccinedll.dll` から DLL をロード
+3. ファイル操作が監視され、コンソール通知
+4. ログが保存される
 
 ---
 

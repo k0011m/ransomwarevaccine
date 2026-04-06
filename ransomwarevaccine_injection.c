@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <windows.h>
+#include <time.h>
+#include <string.h>
 
 void helpoption(){
     printf("Ransomware Vaccine - File Access Monitor & Protection Tool\n\n");
@@ -35,15 +37,33 @@ void helpoption(){
     printf("    -T          Enable logging\n");
     printf("    -F          Disable logging\n\n");
     
+    printf("ADVANCED OPTIONS (Optional):\n");
+    printf("    --dllpath=[path]   Specify custom directory containing the vaccine DLL\n");
+    printf("                       Default: same directory as ransomwarevaccine_injection.exe\n");
+    printf("                       Example: --dllpath=C:\\custom\\path\n\n");
+    
+    printf("    --logpath=[path]   Specify custom directory for log file storage\n");
+    printf("                       Default: C:\\Users\\[Username]\\ransomwarevaccine_logfolder\n");
+    printf("                       Example: --logpath=C:\\logs\n");
+    printf("                       (Only effective when -T logging is enabled)\n\n");
+    
+    printf("    --logname=[name]   Specify custom log file name\n");
+    printf("                       Default: ransomwarevaccine_log_YYYYMMDD_HHMMSS.txt\n");
+    printf("                       Example: --logname=mylog.txt\n");
+    printf("                       (Only effective when -T logging is enabled)\n\n");
+    
     printf("EXAMPLES:\n");
-    printf("    ransomwarevaccine_injection.exe suspicious.exe -AB -TM -T\n");
-    printf("        Monitor suspicious.exe with full blocking, GUI notifications, and logging\n\n");
+    printf("    # Basic usage with default DLL path and log location\n");
+    printf("    ransomwarevaccine_injection.exe suspicious.exe -AB -TM -T\n\n");
     
-    printf("    ransomwarevaccine_injection.exe malware.exe -WDB -TC -F\n");
-    printf("        Block writes/deletes only, console notifications, no logging\n\n");
+    printf("    # With custom DLL path\n");
+    printf("    ransomwarevaccine_injection.exe malware.exe -WDB -TC -T --dllpath=C:\\dlldir\n\n");
     
-    printf("    ransomwarevaccine_injection.exe unknown.exe -AN -F -T\n");
-    printf("        No Block Mode. Monitoring and notification only.\n");
+    printf("    # With custom log path and name\n");
+    printf("    ransomwarevaccine_injection.exe target.exe -AN -F -T --logpath=C:\\mylogdir --logname=analysis.txt\n\n");
+    
+    printf("    # Disable logging\n");
+    printf("    ransomwarevaccine_injection.exe unknown.exe -WDB -TC -F\n\n");
 }
 
 
@@ -66,13 +86,22 @@ int main(int argc, char *selectmode[]){
     }
 
     char targetfilename[256];
-    if (argc>=6){
-        sprintf(targetfilename, "%s\\%s", selectmode[5], "ransomwarevaccine_vaccinedll.dll");
-        if (GetFileAttributesA(targetfilename) == INVALID_FILE_ATTRIBUTES) {
-            MessageBoxA(NULL, "This directory cannot be found", "ERROR MESSAGE", MB_ICONERROR);
-            return 1;
+    // argv[5]以降に --dllpath=[path] があるかを確認
+    int foundDllPath = 0;
+    if (argc >= 6){
+        for (int i = 5; i < argc; i++){
+            char *dllPathStart = strstr(selectmode[i], "--dllpath=");
+            if (dllPathStart){
+                foundDllPath = 1;
+                char *pathValue = dllPathStart + strlen("--dllpath=");
+                sprintf(targetfilename, "%s\\%s", pathValue, "ransomwarevaccine_vaccinedll.dll");
+                break;
+            }
         }
-    }else {
+    }
+    
+    // --dllpath= が見つからなかった場合はデフォルト動作（injectorと同じディレクトリ）
+    if (!foundDllPath){
         char szInjectionPath[MAX_PATH];
         char szInjectionDir[MAX_PATH];
         GetModuleFileNameA(NULL, szInjectionPath, MAX_PATH);
@@ -89,6 +118,11 @@ int main(int argc, char *selectmode[]){
         sprintf(targetfilename, "%s\\%s", szInjectionDir, "ransomwarevaccine_vaccinedll.dll");
     }
     
+    if (GetFileAttributesA(targetfilename) == INVALID_FILE_ATTRIBUTES) {
+        MessageBoxA(NULL, "This directory cannot be found", "ERROR MESSAGE", MB_ICONERROR);
+        return 1;
+    }
+    
     if (!strcmp(selectmode[3], "-TM")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "1");
     else if (!strcmp(selectmode[3], "-TC")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "2");
     else if (!strcmp(selectmode[3], "-F")) SetEnvironmentVariableA("ransomwarevaccine_notice_mode", "0");
@@ -97,9 +131,85 @@ int main(int argc, char *selectmode[]){
         return 1;
     }
 
-    if (!strcmp(selectmode[4], "-T")) SetEnvironmentVariableA("ransomwarevaccine_log_mode", "1");
-    else if (!strcmp(selectmode[4], "-F")) SetEnvironmentVariableA("ransomwarevaccine_log_mode", "0");
-    else{
+    if (!strcmp(selectmode[4], "-T")){
+        SetEnvironmentVariableA("ransomwarevaccine_log_mode", "1");
+        
+        char logFolderPath[512];
+        char logFileName[256];
+        int customLogPath = 0;
+        int customLogName = 0;
+        
+        // argv[5]以降に --logpath= と --logname= があるかを確認
+        if (argc >= 6){
+            for (int i = 5; i < argc; i++){
+                char *logPathStart = strstr(selectmode[i], "--logpath=");
+                if (logPathStart){
+                    customLogPath = 1;
+                    char *pathValue = logPathStart + strlen("--logpath=");
+                    strcpy(logFolderPath, pathValue);
+                }
+                
+                char *logNameStart = strstr(selectmode[i], "--logname=");
+                if (logNameStart){
+                    customLogName = 1;
+                    char *nameValue = logNameStart + strlen("--logname=");
+                    strcpy(logFileName, nameValue);
+                }
+            }
+        }
+        
+        // カスタムログパスが指定されていない場合のデフォルト動作
+        if (!customLogPath){
+            char userName[256];
+            DWORD userNameSize = sizeof(userName);
+            if (!GetUserNameA(userName, &userNameSize)){
+                printf("Error: Failed to get username\n");
+                return 1;
+            }
+            
+            char userPath[512];
+            sprintf(userPath, "C:\\Users\\%s", userName);
+            
+            if (GetFileAttributesA(userPath) == INVALID_FILE_ATTRIBUTES){
+                printf("Error: User folder not found: %s\n", userPath);
+                return 1;
+            }
+            
+            sprintf(logFolderPath, "%s\\ransomwarevaccine_logfolder", userPath);
+        }
+        
+        // ログフォルダが無ければ作成
+        if (GetFileAttributesA(logFolderPath) == INVALID_FILE_ATTRIBUTES){
+            if (!CreateDirectoryA(logFolderPath, NULL)){
+                printf("Error: Failed to create log folder: %s\n", logFolderPath);
+                return 1;
+            }
+        }
+        
+        // カスタムログファイル名が指定されていない場合は自動生成
+        if (!customLogName){
+            time_t now = time(NULL);
+            struct tm *timeinfo = localtime(&now);
+            char dateStr[64];
+            strftime(dateStr, sizeof(dateStr), "%Y%m%d_%H%M%S", timeinfo);
+            sprintf(logFileName, "ransomwarevaccine_log_%s_%s.txt", selectmode[1], dateStr);
+        }
+        
+        char logFilePath[512];
+        sprintf(logFilePath, "%s\\%s", logFolderPath, logFileName);
+        
+        HANDLE hLogFile = CreateFileA(logFilePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hLogFile == INVALID_HANDLE_VALUE){
+            printf("Error: Failed to create log file: %s\n", logFilePath);
+            return 1;
+        }
+        CloseHandle(hLogFile);
+        
+        SetEnvironmentVariableA("ransomwarevaccine_log_file", logFilePath);
+        
+    }else if (!strcmp(selectmode[4], "-F")){
+        SetEnvironmentVariableA("ransomwarevaccine_log_mode", "0");
+    }else{
         printf("Selecting the notice mode -T (log on), -F(log off)");
         return 1;
     }

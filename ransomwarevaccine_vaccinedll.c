@@ -2,6 +2,8 @@
 #include "ransomwarevaccine_vaccinedll.h"
 #include <stdio.h>
 #include <windows.h>
+#include <time.h>
+#include <string.h>
 #include <Dbghelp.h>
 #include <winternl.h>
 #include <Psapi.h>
@@ -83,6 +85,9 @@ FARPROC originalgetproccaddressvar;
 
 LPTHREAD_START_ROUTINE LoadLibAddr;
 
+// ログ書き込み関数の前方宣言
+void write_log(const char* funcname, const char* targetfile);
+
 // GetProcAddress フック用: フック対象関数名 → 自DLL内エクスポート名 の対応テーブル
 char funcvardir[256][256] = {"CreateFileW", "CreateFileA", "WriteFile", "ReadFile", "DeleteFileW", "DeleteFileA", "CreateDirectoryW", "CreateDirectoryA", "CreateProcessW", "CreateProcessA"};
 char originalfuncvardir[256][256] = {"OriginalCreateFileWFunc", "OriginalCreateFileAFunc", "OriginalWriteFileFunc", "OriginalReadFileFunc", "OriginalDeleteFileWFunc", "OriginalDeleteFileAFunc", "OriginalCreateDirectoryWFunc", "OriginalCreateDirectoryAFunc", "OriginalCreateProcessWFunc", "OriginalCreateProcessAFunc"};
@@ -93,6 +98,7 @@ char charNoticeMode[256];
 char charLogMode[256];
 char charProtectMode[256];
 char dll_path[MAX_PATH];
+char log_file_path[MAX_PATH];
 
 DWORD dwNoticeMode;  // MessageBox = 1; CUI = 2; none = 0
 BOOL  bLogMode;      // logTrue = TRUE; logFalse = FALSE
@@ -109,6 +115,14 @@ DWORD dwProtectMode; // AB = 1; WDB = 2; AN = 3
 HANDLE WINAPI OriginalCreateFileWFunc(LPCWSTR filename, DWORD dwAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpsecurity, DWORD dwCreatePosition, DWORD dwFlag, HANDLE hTemplateFile){
     if (dwNoticeMode == 1) MessageBoxW(NULL, filename, L"vaccinedll-createfilew", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[36mCreateFile for \x1b[39m%ls\n", filename);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, filename, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("CreateFileW", filenameA);
+    }
+    
     // AB のみブロック / WDB・AN は通過
     if (dwProtectMode == 1) return INVALID_HANDLE_VALUE;
     OriginalCreateFileW original = (OriginalCreateFileW)originalcreatefilewvar;
@@ -118,6 +132,12 @@ HANDLE WINAPI OriginalCreateFileWFunc(LPCWSTR filename, DWORD dwAccess, DWORD dw
 HANDLE WINAPI OriginalCreateFileAFunc(LPCSTR filename, DWORD dwAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpsecurity, DWORD dwCreatePosition, DWORD dwFlag, HANDLE hTemplateFile){
     if (dwNoticeMode == 1) MessageBoxA(NULL, filename, "vaccinedll-createfilea", MB_OK);
     else if (dwNoticeMode == 2) printf("\n\x1b[36mCreateFile for \x1b[39m%s\n", filename);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        write_log("CreateFileA", filename);
+    }
+    
     // AB のみブロック / WDB・AN は通過
     if (dwProtectMode == 1) return INVALID_HANDLE_VALUE;
     OriginalCreateFileA original = (OriginalCreateFileA)originalcreatefileavar;
@@ -133,8 +153,28 @@ BOOL WINAPI OriginalWriteFileFunc(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberO
         return original(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
     }
     if (GetFinalPathNameByHandleW(hFile, filename, 1025, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) == 0) MessageBoxA(NULL, "writefile handle error", "vaccinedll-ERROR", MB_ICONERROR);
+    
+    // ログファイルへの書き込みの場合、ブロックしない
+    if (bLogMode){
+        wchar_t logFilePathW[MAX_PATH];
+        MultiByteToWideChar(CP_ACP, 0, log_file_path, -1, logFilePathW, MAX_PATH);
+        if (wcscmp(filename, logFilePathW) == 0){
+            // ログファイルへの書き込みなので通す
+            OriginalWriteFile original = (OriginalWriteFile)originalwritefilevar;
+            return original(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+        }
+    }
+    
     if (dwNoticeMode == 1) MessageBoxW(NULL, filename, L"vaccinedll-writefile", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[33mWriteFile for \x1b[39m%ls\n", filename);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, filename, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("WriteFile", filenameA);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalWriteFile original = (OriginalWriteFile)originalwritefilevar;
@@ -146,6 +186,14 @@ BOOL WINAPI OriginalReadFileFunc(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOf
     if (GetFinalPathNameByHandleW(hFile, filename, 1025, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) == 0) MessageBoxA(NULL, "readfile handle error", "vaccinedll-ERROR", MB_ICONERROR);
     if (dwNoticeMode == 1) MessageBoxW(NULL, filename, L"vaccinedll-readfile", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[32mReadFile for \x1b[39m%ls\n", filename);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, filename, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("ReadFile", filenameA);
+    }
+    
     // AB のみブロック / WDB・AN は通過
     if (dwProtectMode == 1) return FALSE;
     OriginalReadFile original = (OriginalReadFile)originalreadfilevar;
@@ -155,6 +203,14 @@ BOOL WINAPI OriginalReadFileFunc(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOf
 BOOL WINAPI OriginalDeleteFileWFunc(LPCWSTR lpFileName){
     if (dwNoticeMode == 1) MessageBoxW(NULL, lpFileName, L"vaccinedll-deletefilew", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[31mDeleteFile for \x1b[39m%ls\n", lpFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, lpFileName, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("DeleteFileW", filenameA);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalDeleteFileW original = (OriginalDeleteFileW)originaldeletefilewvar;
@@ -164,6 +220,12 @@ BOOL WINAPI OriginalDeleteFileWFunc(LPCWSTR lpFileName){
 BOOL WINAPI OriginalDeleteFileAFunc(LPCSTR lpFileName){
     if (dwNoticeMode == 1) MessageBoxA(NULL, lpFileName, "vaccinedll-deletefilea", MB_OK);
     else if (dwNoticeMode == 2) printf("\n\x1b[31mDeleteFile for \x1b[39m%s\n", lpFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        write_log("DeleteFileA", lpFileName);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalDeleteFileA original = (OriginalDeleteFileA)originaldeletefileavar;
@@ -189,6 +251,12 @@ BOOL WINAPI OriginalCreateDirectoryAFunc(LPCSTR lpPathName, LPSECURITY_ATTRIBUTE
 BOOL WINAPI OriginalCopyFileAFunc(LPCSTR lpExistingFileName, LPCSTR lpNewFileName, BOOL bFailIfExists){
     if (dwNoticeMode == 1) MessageBoxA(NULL, lpExistingFileName, "vaccinedll-CopyFileA", MB_OK);
     else if (dwNoticeMode == 2) printf("\n\x1b[36mCopyFile for \x1b[39m%s\n", lpExistingFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        write_log("CopyFileA", lpExistingFileName);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalCopyFileA original = (OriginalCopyFileA)originalcopyfileavar;
@@ -198,6 +266,14 @@ BOOL WINAPI OriginalCopyFileAFunc(LPCSTR lpExistingFileName, LPCSTR lpNewFileNam
 BOOL WINAPI OriginalCopyFileWFunc(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName, BOOL bFailIfExists){
     if (dwNoticeMode == 1) MessageBoxW(NULL, lpExistingFileName, L"vaccinedll-CopyFileW", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[36mCopyFile for \x1b[39m%ls\n", lpExistingFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, lpExistingFileName, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("CopyFileW", filenameA);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalCopyFileW original = (OriginalCopyFileW)originalcopyfilewvar;
@@ -207,6 +283,12 @@ BOOL WINAPI OriginalCopyFileWFunc(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileN
 BOOL WINAPI OriginalMoveFileAFunc(LPCSTR lpExistingFileName, LPCSTR lpNewFileName){
     if (dwNoticeMode == 1) MessageBoxA(NULL, lpExistingFileName, "vaccinedll-MoveFileA", MB_OK);
     else if (dwNoticeMode == 2) printf("\n\x1b[36mMoveFile for \x1b[39m%s\n", lpExistingFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        write_log("MoveFileA", lpExistingFileName);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalMoveFileA original = (OriginalMoveFileA)originalmovefileavar;
@@ -216,6 +298,14 @@ BOOL WINAPI OriginalMoveFileAFunc(LPCSTR lpExistingFileName, LPCSTR lpNewFileNam
 BOOL WINAPI OriginalMoveFileWFunc(LPCWSTR lpExistingFileName, LPCWSTR lpNewFileName){
     if (dwNoticeMode == 1) MessageBoxW(NULL, lpExistingFileName, L"vaccinedll-MoveFileW", MB_OK);
     else if (dwNoticeMode == 2) wprintf(L"\n\x1b[36mMoveFile for \x1b[39m%ls\n", lpExistingFileName);
+    
+    // ログに記録（ファイルアクセス関数のみ）
+    if (bLogMode){
+        char filenameA[512];
+        WideCharToMultiByte(CP_ACP, 0, lpExistingFileName, -1, filenameA, sizeof(filenameA), NULL, NULL);
+        write_log("MoveFileW", filenameA);
+    }
+    
     // AB・WDB はブロック / AN は通過
     if (dwProtectMode == 1 || dwProtectMode == 2) return FALSE;
     OriginalMoveFileW original = (OriginalMoveFileW)originalmovefilewvar;
@@ -414,6 +504,35 @@ int iathook(LPCSTR modulename, LPCSTR dllname, LPCSTR funcname, HookTargetFunc h
     return 0;
 }
 
+void write_log(const char* funcname, const char* targetfile){
+    if (!bLogMode) return;
+    
+    // ログファイルを追記モードで開く
+    HANDLE hLogFile = CreateFileA(log_file_path, FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hLogFile == INVALID_HANDLE_VALUE){
+        MessageBoxA(NULL, "Failed to open log file", "vaccinedll-ERROR", MB_ICONERROR);
+        return;
+    }
+    
+    // タイムスタンプを取得
+    time_t now = time(NULL);
+    struct tm *timeinfo = localtime(&now);
+    char timestamp[64];
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+    
+    // ログ文字列を構築
+    char logBuffer[1024];
+    sprintf(logBuffer, "[%s] Function: %s, Target: %s\r\n", timestamp, funcname, targetfile);
+    
+    // ログを書き込み（WriteFileの標準関数を使用）
+    DWORD bytesWritten;
+    OriginalWriteFile original = (OriginalWriteFile)originalwritefilevar;
+    original(hLogFile, logBuffer, strlen(logBuffer), &bytesWritten, NULL);
+    
+    // ハンドルを閉じる
+    CloseHandle(hLogFile);
+}
+
 int allhook(){
     LoadLibAddr = (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
     GetEnvironmentVariableA("ransomwarevaccine_dll_path", dll_path, MAX_PATH);
@@ -452,6 +571,14 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved){
         // ログモードの読み込み
         DWORD dwRetL = GetEnvironmentVariableA("ransomwarevaccine_log_mode", charLogMode, sizeof(charLogMode));
         if (0 >= dwRetL || dwRetL >= sizeof(charLogMode)) MessageBoxA(NULL, "Enviroment Value error (log_mode)", "vaccinedll-ERROR", MB_ICONERROR);
+        
+        // ログモードが有効な場合、ログファイルパスを読み込む
+        if (!strcmp(charLogMode, "1")){
+            DWORD dwRetLogFile = GetEnvironmentVariableA("ransomwarevaccine_log_file", log_file_path, sizeof(log_file_path));
+            if (0 >= dwRetLogFile || dwRetLogFile >= sizeof(log_file_path)) {
+                MessageBoxA(NULL, "Enviroment Value error (log_file path)", "vaccinedll-ERROR", MB_ICONERROR);
+            }
+        }
 
         // 保護モードの読み込み (AB=1 / WDB=2 / AN=3)
         DWORD dwRetP = GetEnvironmentVariableA("ransomwarevaccine_protect_mode", charProtectMode, sizeof(charProtectMode));
@@ -463,6 +590,14 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved){
         }else if (!strcmp(charNoticeMode, "2")){
             dwNoticeMode = 2;
         }else dwNoticeMode = 0;
+        
+        // ログモードの設定
+        if (!strcmp(charLogMode, "1")){
+            MessageBoxA(NULL, "log mode is 1 (Logging enabled)", "vaccinedll-message", MB_OK);
+            bLogMode = TRUE;
+        }else{
+            bLogMode = FALSE;
+        }
 
         if (!strcmp(charProtectMode, "1")){
             MessageBoxA(NULL, "protect mode is AB (All Block)", "vaccinedll-message", MB_OK);
