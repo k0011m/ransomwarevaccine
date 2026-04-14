@@ -73,6 +73,12 @@ FARPROC originalopenprocessvar;
 
 typedef FARPROC (WINAPI* OriginalGetProcAddress)(HANDLE, LPCSTR);
 
+FARPROC originalgetproccaddressvar;
+
+typedef BOOL (WINAPI* OriginalFreeLibrary)(HMODULE);
+
+FARPROC originalfreelibraryvar;
+
 FARPROC originalvirtualallocvar;
 
 typedef FARPROC (WINAPI* OriginalVirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD);
@@ -80,8 +86,6 @@ typedef FARPROC (WINAPI* OriginalVirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD);
 FARPROC originalvirtualallocexvar;
 
 typedef FARPROC (WINAPI* OriginalVirtualAllocEx)(HANDLE, LPVOID, SIZE_T, DWORD, DWORD);
-
-FARPROC originalgetproccaddressvar;
 
 LPTHREAD_START_ROUTINE LoadLibAddr;
 
@@ -420,11 +424,14 @@ FARPROC WINAPI OriginalGetProcAddressFunc(HMODULE hModule, LPCSTR lpProcName){
     OriginalGetProcAddress original = (OriginalGetProcAddress)originalgetproccaddressvar;
     char funcname[256];
     strcpy(funcname, lpProcName);
-    for (int i = 0; i < 10; i++){
-        if (!strcmp(lpProcName, funcvardir[i])){
-            MessageBoxA(NULL, "GetProcAddress", funcvardir[i], MB_OK);
-            strcpy(funcname, originalfuncvardir[i]);
-            hModule = GetModuleHandleA("ransomwarevaccine_vaccinedll.dll");
+    // AB モードのみリダイレクト処理を行う
+    if (dwProtectMode == 1){
+        for (int i = 0; i < 10; i++){
+            if (!strcmp(lpProcName, funcvardir[i])){
+                MessageBoxA(NULL, "GetProcAddress", funcvardir[i], MB_OK);
+                strcpy(funcname, originalfuncvardir[i]);
+                hModule = GetModuleHandleA("ransomwarevaccine_vaccinedll.dll");
+            }
         }
     }
     FARPROC returnvar = original(hModule, funcname);
@@ -432,6 +439,30 @@ FARPROC WINAPI OriginalGetProcAddressFunc(HMODULE hModule, LPCSTR lpProcName){
     sprintf(errorfuncname, "GetProcAddress error, Call Func:%s", lpProcName);
     if (returnvar == NULL) MessageBoxA(NULL, errorfuncname, "Error", MB_OK);
     return returnvar;
+}
+
+// FreeLibrary フック: ワクチンDLL のアンロードのみ防止
+BOOL WINAPI OriginalFreeLibraryFunc(HMODULE hModule){
+    // hModule のファイルパスを取得
+    wchar_t modulePath[MAX_PATH];
+    if (GetModuleFileNameW(hModule, modulePath, MAX_PATH) == 0){
+        // パス取得失敗時は元の関数を呼ぶ
+        OriginalFreeLibrary original = (OriginalFreeLibrary)originalfreelibraryvar;
+        return original(hModule);
+    }
+    
+    // ワクチンDLL のパスを取得（環境変数から）
+    wchar_t vaccineDllPathW[MAX_PATH];
+    MultiByteToWideChar(CP_ACP, 0, dll_path, -1, vaccineDllPathW, MAX_PATH);
+    
+    if (_wcsicmp(modulePath, vaccineDllPathW) == 0){
+        if (dwNoticeMode == 1) MessageBoxA(NULL, "FreeLibrary blocked (vaccine DLL)", "vaccinedll-freelibrary", MB_OK);
+        else if (dwNoticeMode == 2) printf("\n\x1b[35mFreeLibrary blocked for vaccine DLL\x1b[39m\n");
+        return TRUE;
+    }
+    
+    OriginalFreeLibrary original = (OriginalFreeLibrary)originalfreelibraryvar;
+    return original(hModule);
 }
 
 // VirtualAlloc フック: AB モードのみブロック
@@ -549,6 +580,7 @@ int allhook(){
         iathook(NULL,            "Kernel32.dll",   "CreateProcessW",   (HookTargetFunc)OriginalCreateProcessWFunc,   &originalcreateprocesswvar);
         iathook(NULL,            "Kernel32.dll",   "CreateProcessA",   (HookTargetFunc)OriginalCreateProcessAFunc,   &originalcreateprocessavar);
         iathook(NULL,            "Kernel32.dll",   "GetProcAddress",   (HookTargetFunc)OriginalGetProcAddressFunc,   &originalgetproccaddressvar);
+        iathook(NULL,            "Kernel32.dll",   "FreeLibrary",      (HookTargetFunc)OriginalFreeLibraryFunc,      &originalfreelibraryvar);
         iathook(NULL,            "Kernel32.dll",   "VirtualAlloc",     (HookTargetFunc)OriginalVirtualAllocFunc,     &originalvirtualallocvar);
     }
     return 1;
