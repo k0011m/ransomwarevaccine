@@ -414,21 +414,17 @@ BOOL WINAPI OriginalCreateProcessAFunc(LPCSTR lpApplicationName, LPSTR lpCommand
     return returnvar;
 }
 
-// GetProcAddress フック: AB モードのみ有効
-// ランサムウェアが IAT を迂回して GetProcAddress で直接 Win32 API を取得しようとする手口を封鎖する
+// ランサムウェアが IAT を迂回して GetProcAddress で直接 Win32 API を取得しようとする手口を封鎖
 // フック対象関数名を要求された場合、自DLL内のブロック関数アドレスを返す
 FARPROC WINAPI OriginalGetProcAddressFunc(HMODULE hModule, LPCSTR lpProcName){
     OriginalGetProcAddress original = (OriginalGetProcAddress)originalgetproccaddressvar;
     char funcname[256];
     strcpy(funcname, lpProcName);
-    // AB モードのみリダイレクト処理を行う
-    if (dwProtectMode == 1){
-        for (int i = 0; i < 10; i++){
-            if (!strcmp(lpProcName, funcvardir[i])){
-                MessageBoxA(NULL, "GetProcAddress", funcvardir[i], MB_OK);
-                strcpy(funcname, originalfuncvardir[i]);
-                hModule = GetModuleHandleA("ransomwarevaccine_vaccinedll.dll");
-            }
+    for (int i = 0; i < 10; i++){
+        if (!strcmp(lpProcName, funcvardir[i])){
+            MessageBoxA(NULL, "GetProcAddress", funcvardir[i], MB_OK);
+            strcpy(funcname, originalfuncvardir[i]);
+            hModule = GetModuleHandleA("ransomwarevaccine_vaccinedll.dll");
         }
     }
     FARPROC returnvar = original(hModule, funcname);
